@@ -89,8 +89,8 @@ class TagAutocompleteWin(MainWindowExtension):
 
 VIS_COL = 0
 DATA_COL = 1
-WIN_WIDTH = 260
-WIN_HEIGHT = 480
+WIN_WIDTH = 150
+WIN_HEIGHT = 300
 
 SHIFT = ('Shift_L', 'Shift_R')
 KEYSTATES = Gdk.ModifierType.CONTROL_MASK |Gdk.ModifierType.META_MASK| Gdk.ModifierType.MOD1_MASK | Gdk.ModifierType.LOCK_MASK
@@ -106,18 +106,20 @@ GREY = 65535
 class AutoCompletionTreeView(object):
 
 
-    def __init__(self, model):
+    def __init__(self, model, text_view):
         self.model = model
-
-        self.completion_win = Window()
-        self.completion_win.set_modal(True)
-        self.completion_win.set_keep_above(True)
 
         self.completion_tree_view = BrowserTreeView(self.model)
         self.completion_tree_view.set_enable_search(False)
+        # hide column
+        self.completion_tree_view.set_headers_visible(False)
 
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.completion_scrolled_win = ScrolledWindow(self.completion_tree_view)
-        self.completion_win.add(self.completion_scrolled_win)
+        self.label = Gtk.Label('Tags')
+        box.add(self.label)
+        box.add(self.completion_scrolled_win)
+        box.show_all()
 
         self.column = Gtk.TreeViewColumn()
         self.completion_tree_view.append_column(self.column)
@@ -126,16 +128,17 @@ class AutoCompletionTreeView(object):
         self.column.pack_start(self.renderer_text, False)
         self.column.set_attributes(self.renderer_text, text=DATA_COL)
 
-        # display an undecorated window with a grey border
-        self.completion_scrolled_win.set_size_request(WIN_WIDTH, WIN_HEIGHT)
-        self.completion_scrolled_win.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.completion_win.set_decorated(False)
-        self.completion_scrolled_win.set_border_width(2)
-        # self.completion_scrolled_win.modify_bg(Gtk.StateType.NORMAL, Gdk.Color(GREY))
+        self.completion_scrolled_win.set_policy(Gtk.PolicyType.NEVER,
+                                                Gtk.PolicyType.AUTOMATIC)
+        self.completion_scrolled_win.set_propagate_natural_height(True)
+        self.completion_scrolled_win.set_max_content_height(WIN_HEIGHT)
+        self.completion_scrolled_win.set_size_request(WIN_WIDTH, -1)
         self.column.set_min_width(50)
 
-        # hide column
-        self.completion_tree_view.set_headers_visible(False)
+        # window to display results
+        self.popover = Gtk.Popover()
+        self.popover.set_relative_to(text_view)
+        self.popover.add(box)
 
 
 class AutoCompletion(GObject.GObject):
@@ -181,7 +184,7 @@ class AutoCompletion(GObject.GObject):
     def completion(self, completion_list):
         self.entered_text = ""
        
-        self.ac_tree_view = AutoCompletionTreeView(self.model)
+        self.ac_tree_view = AutoCompletionTreeView(self.model, self.text_view)
         self.tree_selection = self.ac_tree_view.completion_tree_view.get_selection()
 
         self.fill_completion_list(completion_list)
@@ -193,14 +196,14 @@ class AutoCompletion(GObject.GObject):
         if self.activation_char and self.char_insert:
             buffer.insert(cursor, self.activation_char)
 
-        x, y = self.get_iter_pos(self.text_view, self.window)
-        self.ac_tree_view.completion_win.move(x, y)
-        self.ac_tree_view.completion_win.show_all()
+        location = self.get_iter_pos(self.text_view, self.window)
+        self.ac_tree_view.popover.set_pointing_to(location)
+        self.ac_tree_view.popover.popup()
 
-        self.ac_tree_view.completion_win.connect(
-            'key_press_event',
+        self.ac_tree_view.popover.connect(
+            'key-press-event',
             self.do_key_press,
-            self.ac_tree_view.completion_win)
+            self.ac_tree_view.popover)
 
         self.ac_tree_view.completion_tree_view.connect(
             'row-activated',
@@ -217,6 +220,9 @@ class AutoCompletion(GObject.GObject):
           
         self.real_model.foreach(filter)
         self.select_match(tree_selection)
+
+        # update column size
+        self.ac_tree_view.column.queue_resize()
 
     def select_match(self, tree_selection):
         path = None
@@ -242,7 +248,7 @@ class AutoCompletion(GObject.GObject):
 
     def do_row_activated(self, view, path, col):
         self.insert_data()
-        self.ac_tree_view.completion_win.destroy()
+        self.ac_tree_view.popover.destroy()
 
     def do_key_press(self, widget, event, completion_window):
         keyval_name = Gdk.keyval_name(event.keyval)
@@ -295,14 +301,13 @@ class AutoCompletion(GObject.GObject):
                 self.tree_selection.select_path(next_path)
         elif keyval_name in SHIFT:
             return
-        elif shift_mod:
+        elif shift_mod or not modifier:
             buffer.insert(cursor, entered_chr)
             self.entered_text += entered_chr
             self.update_completion_list()
-        elif not modifier:
-            buffer.insert(cursor, entered_chr)
-            self.entered_text += entered_chr
-            self.update_completion_list()
+
+        self.ac_tree_view.label.set_text(_('Tags for: %s' % self.entered_text))
+        return True
 
     def insert_data(self, space=""):
         tree_selection = self.ac_tree_view.completion_tree_view.get_selection()
@@ -311,7 +316,7 @@ class AutoCompletion(GObject.GObject):
         try:
             # is there any entry left or is the list empty?
             selected_data = model[path][DATA_COL]
-        except IndexError:
+        except:
             # if nothing is selected (say: nothing found and nothing is shown in treeview)
             return
 
@@ -327,53 +332,16 @@ class AutoCompletion(GObject.GObject):
         self.emit('tag-selected', selected_data)
 
     def get_iter_pos(self, textview, window):
-
-        xcorr = WIN_WIDTH
-        ycorr = 2
-        
+        """
+        Cursor coordinates.
+        """
         buffer = textview.get_buffer()
         cursor = buffer.get_iter_at_mark(buffer.get_insert())
-
-        top_x, top_y = textview.get_toplevel().get_position()
         iter_location = textview.get_iter_location(cursor)
-        mark_x, mark_y = iter_location.x, iter_location.y + iter_location.height
         # calculate buffer-coordinates to coordinates within the window
-        win_location = textview.buffer_to_window_coords(Gtk.TextWindowType.WIDGET,
-                                                        int(mark_x), int(mark_y))
-        line_height = iter_location.height // 2
-        
-        # now find the right window --> Editor Window and the right pos on screen
-        win = textview.get_window(Gtk.TextWindowType.WIDGET)
-        view_pos = win.get_position()
+        win_location = textview.buffer_to_window_coords(
+            Gtk.TextWindowType.WIDGET, iter_location.x, iter_location.y)
+        iter_location.x = win_location[0]
+        iter_location.y = win_location[1]
 
-        xx = win_location[0] + view_pos[0]
-        yy = win_location[1] + view_pos[1] + iter_location.height
-
-        x = top_x + xx + xcorr
-        y = top_y + yy + ycorr - line_height
-        x, y = self.calculate_with_monitors(x, y, iter_location, window,
-                                            xcorr=xcorr, ycorr=ycorr+line_height)
-        return (x, y + iter_location.height)
-    
-    def calculate_with_monitors(self, x, y, iter_location, window, xcorr=0, ycorr=0):
-        '''
-        Calculate correct x,y position if multiple monitors are used
-        '''
-        STATUS_BAR_CORRECTION = 30
-        screen = window.get_screen()
-
-        cursor_screen = screen.get_monitor_at_point(x, y)
-        cursor_monitor_geom = screen.get_monitor_geometry(cursor_screen)
-
-        if x + WIN_WIDTH >= (cursor_monitor_geom.width + cursor_monitor_geom.x):
-            diff = x - (cursor_monitor_geom.width + cursor_monitor_geom.x) + WIN_WIDTH
-            x = x - diff
-            x += xcorr
-
-        if y + iter_location.height + WIN_HEIGHT >= (
-                cursor_monitor_geom.height + cursor_monitor_geom.y - STATUS_BAR_CORRECTION):
-            diff = WIN_HEIGHT + 2 * iter_location.height
-            y = y - diff
-            y += ycorr
-
-        return x, y
+        return iter_location
