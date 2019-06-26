@@ -72,19 +72,26 @@ class TagAutocompleteWin(MainWindowExtension):
         self.connectto(window.pageview.textview, 'key-press-event')
 
     @action(_('Auto_Completion'), ) # T: menu item
-    def tag_auto_completion(self):
+    def tag_auto_completion(self, char_insert=False):
         text_view = self.window.pageview.textview
         all_tags = self.window.notebook.tags.list_all_tags()
         tag_list = [tag.name for tag in all_tags]
         activation_char = "@"
         tag_auto_completion = AutoCompletion(self.plugin, text_view, self.window, 
-                                             activation_char, char_insert=False)
+                                             activation_char, char_insert=char_insert)
         # tag_list as param for completion method as otherwise the list is added at each activation?
         tag_auto_completion.completion(tag_list)
 
     def on_key_press_event(self, widget, event):
+        """
+        Handle activation.
+        """
         if event.keyval == ACTKEY_keyval:
             self.tag_auto_completion()
+        else:
+            alt_mod = event.get_state() & Gdk.ModifierType.MOD1_MASK
+            if alt_mod and event.keyval == Gdk.KEY_t:
+                self.tag_auto_completion(char_insert=True)
 
 
 VIS_COL = 0
