@@ -20,7 +20,7 @@ from gi.repository import GObject, Gtk, Gdk
 from zim.plugins import PluginClass
 from zim.gui.mainwindow import MainWindowExtension
 from zim.actions import action
-from zim.gui.widgets import Window, BrowserTreeView, ScrolledWindow
+from zim.gui.widgets import BrowserTreeView, ScrolledWindow
 
 # @
 ACTKEY = 'at'
