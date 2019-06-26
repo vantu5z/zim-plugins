@@ -25,6 +25,7 @@ from zim.gui.widgets import BrowserTreeView, ScrolledWindow
 # @
 ACTKEY = 'at'
 ACTKEY_keyval = 64
+scan_key_T = 28
 
 logger = logging.getLogger('zim.plugins.autocompletion')
 
@@ -90,7 +91,7 @@ class TagAutocompleteWin(MainWindowExtension):
             self.tag_auto_completion()
         else:
             alt_mod = event.get_state() & Gdk.ModifierType.MOD1_MASK
-            if alt_mod and event.keyval == Gdk.KEY_t:
+            if alt_mod and event.get_scancode() == scan_key_T:
                 self.tag_auto_completion(char_insert=True)
 
 
